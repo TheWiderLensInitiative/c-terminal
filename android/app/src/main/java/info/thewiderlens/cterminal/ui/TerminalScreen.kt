@@ -151,6 +151,10 @@ private class TermLink(
                     backoff = (backoff * 2).coerceAtMost(15_000L)
                 }
             }
+            override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                webSocket.close(1000, null)
+                if (code == 1001) main.post { backoff = 1000L }   // companion restarting: retry quickly
+            }
             override fun onClosed(webSocket: WebSocket, code: Int, reason: String) = onFailure(webSocket, Exception(reason), null)
         })
     }

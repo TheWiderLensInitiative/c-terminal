@@ -4,6 +4,8 @@ import android.app.Service
 import android.content.Context
 import android.content.Intent
 import android.content.pm.ServiceInfo
+import android.net.ConnectivityManager
+import android.net.Network
 import android.os.IBinder
 import androidx.core.app.NotificationCompat
 import androidx.core.app.ServiceCompat
@@ -17,7 +19,8 @@ import kotlinx.coroutines.Dispatchers
 import kotlinx.coroutines.Job
 import kotlinx.coroutines.SupervisorJob
 import kotlinx.coroutines.cancel
-import kotlinx.coroutines.delay
+import kotlinx.coroutines.channels.Channel
+import kotlinx.coroutines.withTimeoutOrNull
 import kotlinx.coroutines.flow.combine
 import kotlinx.coroutines.flow.distinctUntilChanged
 import kotlinx.coroutines.launch
@@ -45,6 +48,7 @@ class WatchService : Service() {
         super.onCreate()
         ServiceCompat.startForeground(this, Notifier.SERVICE_ID, quietNotification(0),
             if (android.os.Build.VERSION.SDK_INT >= 34) ServiceInfo.FOREGROUND_SERVICE_TYPE_SPECIAL_USE else 0)
+        getSystemService(ConnectivityManager::class.java).registerDefaultNetworkCallback(network)
         val store = (application as CTerminalApp).store
         scope.launch {
             combine(store.machines, store.settings) { m, s -> m to s.away }.distinctUntilChanged().collect { (machines, awayNow) ->
@@ -68,7 +72,13 @@ class WatchService : Service() {
 
     override fun onStartCommand(intent: Intent?, flags: Int, startId: Int) = START_STICKY
 
+    /** Back on Wi-Fi or mobile data: reconnect now instead of waiting out the retry timer. */
+    private val network = object : ConnectivityManager.NetworkCallback() {
+        override fun onAvailable(n: Network) { watches.values.forEach { it.kick.trySend(Unit) } }
+    }
+
     override fun onDestroy() {
+        runCatching { getSystemService(ConnectivityManager::class.java).unregisterNetworkCallback(network) }
         watches.values.forEach { it.stop() }
         scope.cancel()
         super.onDestroy()
@@ -92,6 +102,7 @@ class WatchService : Service() {
         private var job: Job? = null
         private var ws: WebSocket? = null
         private var lastSeq = -1L
+        val kick = Channel<Unit>(Channel.CONFLATED)
         @Volatile var connected = false
 
         fun start() {
@@ -110,14 +121,21 @@ class WatchService : Service() {
                             e["seq"]?.jsonPrimitive?.longOrNull?.let { if (it > lastSeq) lastSeq = it }
                             handle(e)
                         }
+                        override fun onClosing(webSocket: WebSocket, code: Int, reason: String) {
+                            // 1001 = the companion is restarting: it'll be back in a moment, so retry quickly.
+                            if (code == 1001) backoff = 1_000L
+                            webSocket.close(1000, null)
+                            closed.complete(Unit)
+                        }
                         override fun onClosed(webSocket: WebSocket, code: Int, reason: String) { closed.complete(Unit) }
                         override fun onFailure(webSocket: WebSocket, t: Throwable, response: Response?) { closed.complete(Unit) }
                     })
                     closed.await()
                     if (connected) { connected = false; Inbox.setOnline(machine.id, false); updateQuiet() }
                     else Inbox.setOnline(machine.id, false)
-                    delay(backoff)
-                    backoff = (backoff * 2).coerceAtMost(60_000L)
+                    // wait, unless the network comes back first
+                    withTimeoutOrNull(backoff) { kick.receive() }
+                    backoff = (backoff * 2).coerceAtMost(15_000L)
                 }
             }
         }
