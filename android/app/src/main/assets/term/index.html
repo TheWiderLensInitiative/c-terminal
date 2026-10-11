@@ -6,7 +6,7 @@
 <link rel="stylesheet" href="xterm.css">
 <style>
   html, body { margin: 0; height: 100%; background: #05080a; overflow: hidden; }
-  #term { position: absolute; inset: 4px 2px 0 6px; touch-action: none; }
+  #term { position: absolute; inset: 4px 2px 0 6px; }
   #bottom { position: absolute; right: 14px; bottom: 14px; width: 44px; height: 44px; border-radius: 22px;
             border: 1px solid #5cfded; background: rgba(5,8,10,.85); color: #5cfded; font: 22px sans-serif;
             display: none; align-items: center; justify-content: center; z-index: 10; }
@@ -80,12 +80,12 @@
     },
   };
 
-  // ---- touch scrolling -------------------------------------------------------------------------------------------
-  // A swipe scrolls the history (with a fling). Full-screen apps (vim, htop, less) get mouse-wheel events if they asked
-  // for the mouse, or arrow keys otherwise, like a desktop terminal's scroll wheel. A tap still opens the keyboard.
+  // ---- touch ------------------------------------------------------------------------------------------------------
+  // A swipe scrolls (the terminal library has no touch scrolling of its own); full-screen programs (Claude Code, vim,
+  // htop, less) get scroll-wheel input or arrow keys instead. Press-and-hold is left alone: Android's own Paste bubble.
   const host = document.getElementById("term");
   const bottomBtn = document.getElementById("bottom");
-  let startY = 0, lastY = 0, lastT = 0, acc = 0, velocity = 0, dragging = false, fling = 0;
+  let startY = 0, lastY = 0, lastT = 0, acc = 0, velocity = 0, swiping = false, fling = 0;
 
   function lineHeight() {
     const screen = host.querySelector(".xterm-screen");
@@ -93,53 +93,40 @@
   }
   function scrollBy(lines) {          // lines < 0: towards older output
     if (!lines) return;
-    const buf = term.buffer.active;
-    if (buf.type === "alternate") {
-      const up = lines < 0, n = Math.min(Math.abs(lines), 10);
-      let seq;
-      if (term.modes.mouseTrackingMode !== "none") {
-        const col = Math.floor(term.cols / 2), row = Math.floor(term.rows / 2);
-        seq = `\x1b[<${up ? 64 : 65};${col};${row}M`;
-      } else {
-        seq = term.modes.applicationCursorKeysMode ? (up ? "\x1bOA" : "\x1bOB") : (up ? "\x1b[A" : "\x1b[B");
-      }
-      Android.input(seq.repeat(n));
+    if (term.buffer.active.type === "normal") { term.scrollLines(lines); return; }
+    const up = lines < 0, n = Math.min(Math.abs(lines), 10);
+    let seq;
+    if (term.modes.mouseTrackingMode !== "none") {
+      seq = `\x1b[<${up ? 64 : 65};${Math.floor(term.cols / 2)};${Math.floor(term.rows / 2)}M`;
     } else {
-      term.scrollLines(lines);
+      seq = term.modes.applicationCursorKeysMode ? (up ? "\x1bOA" : "\x1bOB") : (up ? "\x1b[A" : "\x1b[B");
     }
+    Android.input(seq.repeat(n));
   }
-  function updateBottom() {
-    const buf = term.buffer.active;
-    bottomBtn.style.display = buf.type === "normal" && buf.viewportY < buf.baseY ? "flex" : "none";
-  }
-  let pressTimer = 0;                 // long-press opens the select-and-copy view
   host.addEventListener("touchstart", e => {
-    if (e.touches.length !== 1) return;
     cancelAnimationFrame(fling);
-    clearTimeout(pressTimer);
-    pressTimer = setTimeout(() => { if (!dragging) Android.longPress(); }, 450);
-    startY = lastY = e.touches[0].clientY; lastT = performance.now(); acc = 0; velocity = 0; dragging = false;
+    swiping = false;
+    if (e.touches.length !== 1) return;
+    startY = lastY = e.touches[0].clientY; lastT = performance.now(); acc = 0; velocity = 0;
   }, { passive: true, capture: true });
   host.addEventListener("touchmove", e => {
     if (e.touches.length !== 1) return;
     const y = e.touches[0].clientY, now = performance.now();
-    if (!dragging && Math.abs(y - startY) < 8) return;
-    dragging = true;
-    clearTimeout(pressTimer);
+    if (!swiping && Math.abs(y - startY) < 10) return;
+    swiping = true;
     e.preventDefault(); e.stopPropagation();
     const dy = lastY - y;                 // finger up = positive = newer output
     velocity = dy / Math.max(1, now - lastT);
-    lastY = y; lastT = now;
-    acc += dy;
+    lastY = y; lastT = now; acc += dy;
     const h = lineHeight(), lines = Math.trunc(acc / h);
     if (lines) { acc -= lines * h; scrollBy(lines); }
   }, { passive: false, capture: true });
   host.addEventListener("touchend", e => {
-    clearTimeout(pressTimer);
-    if (!dragging) return;              // a tap: let xterm focus and open the keyboard
+    if (!swiping) return;               // a tap or press-and-hold: leave it to the terminal and Android
     e.preventDefault(); e.stopPropagation();
-    dragging = false;
-    let v = velocity * 16;              // px per frame
+    swiping = false;
+    if (term.buffer.active.type !== "normal") return;
+    let v = velocity * 16;
     const step = () => {
       if (Math.abs(v) < 0.6) return;
       acc += v; v *= 0.94;
@@ -147,14 +134,19 @@
       if (lines) { acc -= lines * h; scrollBy(lines); }
       fling = requestAnimationFrame(step);
     };
-    if (term.buffer.active.type === "normal") fling = requestAnimationFrame(step);
+    fling = requestAnimationFrame(step);
   }, { passive: false, capture: true });
-  host.addEventListener("touchcancel", () => clearTimeout(pressTimer), { capture: true });
-  // Some engines turn a long-press into a context menu instead: treat that as the long-press too.
-  document.addEventListener("contextmenu", e => { e.preventDefault(); if (!dragging) Android.longPress(); });
+
+  function updateBottom() {
+    const buf = term.buffer.active;
+    bottomBtn.style.display = buf.type === "normal" && buf.viewportY < buf.baseY ? "flex" : "none";
+  }
   term.onScroll(updateBottom);
   term.onWriteParsed(updateBottom);
   bottomBtn.addEventListener("click", () => { term.scrollToBottom(); updateBottom(); });
+
+  // What is selected right now: the terminal's own selection, or text selected by Android's press-and-hold.
+  window.ct.selected = () => term.getSelection() || String(window.getSelection() || "");
 
   refit();
   Android.ready(term.cols, term.rows);

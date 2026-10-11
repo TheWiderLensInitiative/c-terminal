@@ -137,7 +137,6 @@ private class TermLink(
     @JavascriptInterface fun resize(c: Int, r: Int) { cols = c; rows = r; ws?.send("""{"type":"resize","cols":$c,"rows":$r}""") }
     @JavascriptInterface fun title(t: String) { main.post { onTitle(t) } }
     @JavascriptInterface fun fontSize(): String = currentFont().toString()
-    @JavascriptInterface fun longPress() { main.post { onLongPress() } }
 
     fun send(text: String) { ws?.send(text.toByteArray().toByteString()) }
     fun redraw() { ws?.send("""{"type":"redraw"}""") }
@@ -232,6 +231,16 @@ fun TerminalScreen(machine: Machine, sessionId: String, initialName: String, onB
             selectText = runCatching { org.json.JSONArray("[$raw]").getString(0) }.getOrDefault("")
         }
     }
+    /** Copy key: copy what's selected; with nothing selected, open the whole text to pick from. */
+    fun copySelected() {
+        web?.evaluateJavascript("ct.selected()") { raw ->
+            val text = runCatching { org.json.JSONArray("[$raw]").getString(0) }.getOrDefault("")
+            if (text.isNotEmpty()) {
+                context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("terminal", text))
+                Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
+            } else openSelect()
+        }
+    }
 
     BackHandler(onBack = onBack)
     DisposableEffect(Unit) { onDispose { link?.close(); web?.destroy() } }
@@ -265,14 +274,6 @@ fun TerminalScreen(machine: Machine, sessionId: String, initialName: String, onB
                     setBackgroundColor(android.graphics.Color.parseColor("#05080a"))
                     // The terminal's hidden input box isn't a form: no "Autofill" bubbles over it.
                     importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
-                    // Long-press opens the select-and-copy view. Handled here, natively, because on many phones the
-                    // browser engine claims the long-press for its own selection and the page never sees it.
-                    isLongClickable = true
-                    isHapticFeedbackEnabled = true
-                    setOnLongClickListener {
-                        performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
-                        openSelect(); true
-                    }
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = false
                     settings.allowContentAccess = false
@@ -301,7 +302,7 @@ fun TerminalScreen(machine: Machine, sessionId: String, initialName: String, onB
                         "Ctrl" -> mods.ctrl = !mods.ctrl
                         "Alt" -> mods.alt = !mods.alt
                         "Paste" -> paste()
-                        "Copy" -> openSelect()
+                        "Copy" -> copySelected()
                         else -> link?.send(mods.apply(seq))
                     }
                 }

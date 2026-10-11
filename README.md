@@ -32,8 +32,8 @@ And the terminal itself:
   there, scrollback included. Continue the same session at your desk with `cterm attach`.
 - **Your Tailscale account is the key.** The companion listens only on your Tailscale addresses and lets in only
   devices signed in to the same Tailscale account (others can be added by login). Nothing to pair, nothing to leak.
-- **Built for thumbs.** Swipe to scroll back (with a fling; full-screen apps get scroll-wheel input), Paste and Copy
-  keys (long-press the terminal to select text), an extra-keys row (Esc, Tab, sticky Shift/Ctrl/Alt, arrows, ^C…; Shift+Tab switches Claude Code's mode, Shift+send adds a new line), a line
+- **Built for thumbs.** Swipe to scroll back (with a fling; full-screen apps get scroll-wheel input), press and hold
+  to paste, a Copy key (copies your selection, or opens the text to select from), an extra-keys row (Esc, Tab, sticky Shift/Ctrl/Alt, arrows, ^C…; Shift+Tab switches Claude Code's mode, Shift+send adds a new line), a line
   box with autocorrect and voice typing for talking to agents, full-color terminal (xterm.js), adjustable font.
 
 ## Install
@@ -56,7 +56,7 @@ Release APKs are signed with this certificate (SHA-256):
 
 | | |
 |---|---|
-| Start something | Open a computer → **Shell**, **Claude Code**, **Codex** or **Command…** |
+| Start something | Open a computer → **New session** (a shell; run anything, `claude` and `codex` included) or **Command…** |
 | Away mode | Switch on the home screen. While it's on, Claude Code's permission prompts go to the phone instead of the PC screen. If nobody answers within 5 minutes, Claude asks on the PC as usual |
 | At the desk | `cterm ls`, `cterm attach <id>` (Ctrl-] leaves it running), `cterm new --run claude` |
 | Claude Code & Codex | `cterm hooks install` connects both (the installer offers it): permission prompts go to the phone in away mode, and you hear when they finish. Codex has no "Always allow" from a hook, so its approvals are Allow or Deny |

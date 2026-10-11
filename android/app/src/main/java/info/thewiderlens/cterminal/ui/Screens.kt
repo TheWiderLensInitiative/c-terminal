@@ -388,9 +388,7 @@ private fun AddMachineDialog(onDone: () -> Unit) {
 private data class Launch(val label: String, val run: String?, val name: String?)
 
 private val LAUNCHES = listOf(
-    Launch("Shell", null, null),
-    Launch("Claude Code", "claude", "Claude Code"),
-    Launch("Codex", "codex --no-alt-screen", "Codex"),   // inline: its conversation stays scrollable
+    Launch("New session", null, null),
 )
 
 @OptIn(ExperimentalMaterial3Api::class)
@@ -452,7 +450,7 @@ fun SessionsScreen(machine: Machine, go: (Screen) -> Unit) {
             when {
                 list == null && error == null -> item { CircularProgressIndicator(color = Mint) }
                 list.isNullOrEmpty() -> item {
-                    Text("Nothing running yet. Start a shell, Claude Code or Codex above: it keeps running on ${machine.name} even when you close the app.",
+                    Text("Nothing running yet. Tap New session: it keeps running on ${machine.name} even when you close the app.",
                         fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 else -> {
