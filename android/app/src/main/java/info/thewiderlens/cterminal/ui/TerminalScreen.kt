@@ -226,6 +226,7 @@ fun TerminalScreen(machine: Machine, sessionId: String, initialName: String, onB
         else web?.evaluateJavascript("ct.paste(${org.json.JSONObject.quote(clip)})", null)
     }
     fun openSelect() {
+        if (selectText != null) return
         web?.evaluateJavascript("ct.text(3000)") { raw ->
             selectText = runCatching { org.json.JSONArray("[$raw]").getString(0) }.getOrDefault("")
         }
@@ -263,6 +264,14 @@ fun TerminalScreen(machine: Machine, sessionId: String, initialName: String, onB
                     setBackgroundColor(android.graphics.Color.parseColor("#05080a"))
                     // The terminal's hidden input box isn't a form: no "Autofill" bubbles over it.
                     importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
+                    // Long-press opens the select-and-copy view. Handled here, natively, because on many phones the
+                    // browser engine claims the long-press for its own selection and the page never sees it.
+                    isLongClickable = true
+                    isHapticFeedbackEnabled = true
+                    setOnLongClickListener {
+                        performHapticFeedback(android.view.HapticFeedbackConstants.LONG_PRESS)
+                        openSelect(); true
+                    }
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = false
                     settings.allowContentAccess = false

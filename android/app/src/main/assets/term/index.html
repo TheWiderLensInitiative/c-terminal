@@ -117,7 +117,7 @@
     if (e.touches.length !== 1) return;
     cancelAnimationFrame(fling);
     clearTimeout(pressTimer);
-    pressTimer = setTimeout(() => { if (!dragging) Android.longPress(); }, 550);
+    pressTimer = setTimeout(() => { if (!dragging) Android.longPress(); }, 450);
     startY = lastY = e.touches[0].clientY; lastT = performance.now(); acc = 0; velocity = 0; dragging = false;
   }, { passive: true, capture: true });
   host.addEventListener("touchmove", e => {
@@ -150,6 +150,8 @@
     if (term.buffer.active.type === "normal") fling = requestAnimationFrame(step);
   }, { passive: false, capture: true });
   host.addEventListener("touchcancel", () => clearTimeout(pressTimer), { capture: true });
+  // Some engines turn a long-press into a context menu instead: treat that as the long-press too.
+  document.addEventListener("contextmenu", e => { e.preventDefault(); if (!dragging) Android.longPress(); });
   term.onScroll(updateBottom);
   term.onWriteParsed(updateBottom);
   bottomBtn.addEventListener("click", () => { term.scrollToBottom(); updateBottom(); });
