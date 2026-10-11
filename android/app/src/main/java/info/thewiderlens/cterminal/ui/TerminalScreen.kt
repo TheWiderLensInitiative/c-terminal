@@ -72,25 +72,40 @@ import okio.ByteString
 import okio.ByteString.Companion.toByteString
 import java.io.ByteArrayOutputStream
 
-/** Sticky modifier keys from the extra-keys row; they apply to the next key typed anywhere. */
+/** Sticky modifier keys from the extra-keys row; they apply to the next key typed anywhere, then release. */
 class Mods {
+    var shift by mutableStateOf(false)
     var ctrl by mutableStateOf(false)
     var alt by mutableStateOf(false)
 
     fun apply(data: String): String {
-        var out = data
-        if (ctrl && out.length == 1) {
-            val c = out[0]
-            out = when (c) {
-                in 'a'..'z' -> (c - 'a' + 1).toChar().toString()
-                in '@'..'_' -> (c - '@').toChar().toString()
-                ' ' -> "\u0000"
-                '?' -> "\u007f"
-                else -> out
+        if (!shift && !ctrl && !alt) return data
+        val code = 1 + (if (shift) 1 else 0) + (if (alt) 2 else 0) + (if (ctrl) 4 else 0)   // xterm modifier number
+        val csi = Regex("^\u001b\\[([0-9]*)([A-DHF~])$").find(data)
+        val out = when {
+            // arrows, Home/End, PgUp/PgDn: ESC[1;<mod>A  /  ESC[5;<mod>~
+            csi != null -> {
+                val (num, fin) = csi.destructured
+                if (fin == "~") "\u001b[$num;$code~" else "\u001b[1;$code$fin"
             }
+            data == "\t" && shift -> "\u001b[Z"                       // Shift+Tab (Claude Code: switch mode)
+            data == "\r" && shift -> "\\\r"                           // Shift+Enter: new line without sending
+            data.length == 1 -> {
+                var c = data[0]
+                if (shift) c = c.uppercaseChar()
+                var o = c.toString()
+                if (ctrl) o = when (c) {
+                    in 'a'..'z' -> (c - 'a' + 1).toChar().toString()
+                    in '@'..'_' -> (c - '@').toChar().toString()
+                    ' ' -> "\u0000"
+                    '?' -> "\u007f"
+                    else -> o
+                }
+                if (alt) "\u001b" + o else o
+            }
+            else -> data
         }
-        if (alt) out = "\u001b" + out
-        if (ctrl || alt) { ctrl = false; alt = false }
+        shift = false; ctrl = false; alt = false
         return out
     }
 }
@@ -129,9 +144,10 @@ private class TermLink(
     /** Type a line, then press Enter as a separate keypress. Sent in one burst, apps like Claude Code take
      *  text+Enter for a paste and add a new line instead of submitting. */
     fun sendLine(text: String) {
-        if (text.isEmpty()) { send("\r"); return }
+        val enter = mods.apply("\r")          // with Shift armed: a new line instead of sending
+        if (text.isEmpty()) { send(enter); return }
         send(text)
-        main.postDelayed({ send("\r") }, 150)
+        main.postDelayed({ send(enter) }, 150)
     }
 
     private fun js(code: String) = web.evaluateJavascript(code, null)
@@ -183,7 +199,7 @@ private class TermLink(
 }
 
 private val KEYS = listOf(
-    "Esc" to "\u001b", "Tab" to "\t", "Ctrl" to "", "Alt" to "", "Paste" to "", "Copy" to "", "←" to "\u001b[D", "↑" to "\u001b[A",
+    "Esc" to "\u001b", "Tab" to "\t", "Shift" to "", "Ctrl" to "", "Alt" to "", "Paste" to "", "Copy" to "", "←" to "\u001b[D", "↑" to "\u001b[A",
     "↓" to "\u001b[B", "→" to "\u001b[C", "^C" to "\u0003", "|" to "|", "~" to "~", "/" to "/", "-" to "-",
     "Home" to "\u001b[H", "End" to "\u001b[F", "PgUp" to "\u001b[5~", "PgDn" to "\u001b[6~", "^D" to "\u0004",
 )
@@ -268,9 +284,10 @@ fun TerminalScreen(machine: Machine, sessionId: String, initialName: String, onB
         Row(Modifier.fillMaxWidth().background(Panel).horizontalScroll(rememberScrollState()).padding(horizontal = 4.dp, vertical = 4.dp),
             horizontalArrangement = Arrangement.spacedBy(4.dp)) {
             for ((label, seq) in KEYS) {
-                val active = (label == "Ctrl" && mods.ctrl) || (label == "Alt" && mods.alt)
+                val active = (label == "Ctrl" && mods.ctrl) || (label == "Alt" && mods.alt) || (label == "Shift" && mods.shift)
                 TextKey(label, active) {
                     when (label) {
+                        "Shift" -> mods.shift = !mods.shift
                         "Ctrl" -> mods.ctrl = !mods.ctrl
                         "Alt" -> mods.alt = !mods.alt
                         "Paste" -> paste()
@@ -288,11 +305,11 @@ fun TerminalScreen(machine: Machine, sessionId: String, initialName: String, onB
                 textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = Mono),
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { link?.sendLine(mods.apply(line)); line = "" }),
+                keyboardActions = KeyboardActions(onSend = { link?.sendLine(line); line = "" }),
                 colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Mint, unfocusedBorderColor = MaterialTheme.colorScheme.outline),
                 shape = RoundedCornerShape(12.dp),
             )
-            IconButton(onClick = { link?.sendLine(mods.apply(line)); line = "" }) {
+            IconButton(onClick = { link?.sendLine(line); line = "" }) {
                 Icon(Icons.AutoMirrored.Filled.Send, "Send", tint = Mint)
             }
         }
