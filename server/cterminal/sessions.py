@@ -194,6 +194,7 @@ class SessionManager:
         except ChildProcessError:
             code = 0
         s.exit_code = code
+        s.command = None
         self._close(s, remove=False)
         for c in s.clients:
             c.queue.put_nowait({"type": "exit", "code": code})

@@ -15,6 +15,7 @@ import logging
 import os
 import platform
 import signal
+import weakref
 
 from aiohttp import WSMsgType, web
 
@@ -27,6 +28,7 @@ log = logging.getLogger("cterminal")
 
 HUB = web.AppKey("hub", EventHub)
 SESSIONS = web.AppKey("sessions", SessionManager)
+SOCKETS = web.AppKey("sockets", weakref.WeakSet)
 IDENTITY = web.AppKey("identity", Identity)
 CFG = web.AppKey("cfg", config.Config)
 
@@ -133,6 +135,7 @@ async def term_ws(request: web.Request):
     mgr = request.app[SESSIONS]
     ws = web.WebSocketResponse(heartbeat=25, max_msg_size=4 * 1024 * 1024)
     await ws.prepare(request)
+    request.app[SOCKETS].add(ws)
 
     client = Client()
     cols, rows = request.query.get("cols"), request.query.get("rows")
@@ -188,6 +191,7 @@ async def events_ws(request: web.Request):
     hub = request.app[HUB]
     ws = web.WebSocketResponse(heartbeat=45)
     await ws.prepare(request)
+    request.app[SOCKETS].add(ws)
     w = Watcher(request["peer"].device, request.query.get("approvals") == "1")
     since = int(request.query.get("since", hub.seq))
     for e in hub.since(since):
@@ -315,7 +319,15 @@ def _routes(app: web.Application) -> None:
 
 def _share(app: web.Application, cfg, ident, hub, mgr) -> web.Application:
     app[CFG], app[IDENTITY], app[HUB], app[SESSIONS] = cfg, ident, hub, mgr
+    app[SOCKETS] = weakref.WeakSet()
+    app.on_shutdown.append(_close_sockets)
     return app
+
+
+async def _close_sockets(app: web.Application) -> None:
+    """Live connections would otherwise hold shutdown open; phones reconnect by themselves."""
+    for ws in list(app[SOCKETS]):
+        await ws.close(code=1001, message=b"companion restarting")
 
 
 # ------------------------------------------------------------------------------------------------- run
@@ -331,12 +343,12 @@ async def serve(cfg: config.Config) -> None:
     local.router.add_post("/hook/claude", hook_claude)
     local.router.add_post("/hook/codex", hook_codex)
 
-    local_runner = web.AppRunner(local, access_log=None)
+    local_runner = web.AppRunner(local, access_log=None, shutdown_timeout=3)
     await local_runner.setup()
     await web.TCPSite(local_runner, "127.0.0.1", cfg.local_port).start()
     log.info("local API on 127.0.0.1:%d", cfg.local_port)
 
-    phone_runner = web.AppRunner(phone, access_log=None)
+    phone_runner = web.AppRunner(phone, access_log=None, shutdown_timeout=3)
     await phone_runner.setup()
     bound: set[str] = set()
     stop = asyncio.Event()

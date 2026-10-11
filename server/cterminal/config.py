@@ -7,7 +7,7 @@ import secrets
 from dataclasses import asdict, dataclass, field
 from pathlib import Path
 
-VERSION = "0.1.0"
+VERSION = "0.1.1"
 HOME = Path(os.environ.get("CTERMINAL_HOME", Path.home() / ".config" / "c-terminal"))
 CONFIG_FILE = HOME / "config.json"
 LOCAL_TOKEN_FILE = HOME / "local.token"   # guards the loopback API that the Claude Code / Codex hooks use

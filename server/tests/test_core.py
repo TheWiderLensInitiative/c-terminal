@@ -54,6 +54,11 @@ def _free_port() -> int:
 
 @pytest.fixture
 async def companion(tmp_path, monkeypatch):
+    async for c in _companion(tmp_path, monkeypatch):
+        yield c[:3]
+
+
+async def _companion(tmp_path, monkeypatch):
     monkeypatch.setattr(config, "HOME", tmp_path)
     monkeypatch.setattr(config, "LOCAL_TOKEN_FILE", tmp_path / "local.token")
     from cterminal import server, tailnet
@@ -73,7 +78,7 @@ async def companion(tmp_path, monkeypatch):
     phone = aiohttp.ClientSession(f"http://127.0.0.1:{cfg.port}", headers={"X-CTerminal": "1"})
     local = aiohttp.ClientSession(f"http://127.0.0.1:{cfg.local_port}",
                                   headers={"Authorization": f"Bearer {config.local_token()}"})
-    yield phone, local, cfg
+    yield phone, local, cfg, task
     await phone.close()
     await local.close()
     task.cancel()
@@ -205,3 +210,20 @@ def test_hooks_install_is_idempotent_and_removable(tmp_path, monkeypatch):
     cli.hooks_install(remove=True)
     s = json.loads(path.read_text())
     assert s == {"model": "x", "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "mine"}]}]}}
+
+
+async def test_stops_promptly_with_phones_connected(tmp_path, monkeypatch):
+    gen = _companion(tmp_path, monkeypatch)
+    phone, _, _, task = await gen.__anext__()
+    events = await phone.ws_connect("/ws/events")
+    s = await (await phone.post("/api/sessions", json={})).json()
+    term = await phone.ws_connect(f"/ws/term/{s['id']}")
+    task.cancel()
+    async with asyncio.timeout(6):
+        await asyncio.gather(task, return_exceptions=True)
+    async with asyncio.timeout(3):
+        while (await term.receive()).type not in (aiohttp.WSMsgType.CLOSE, aiohttp.WSMsgType.CLOSED):
+            pass
+    await events.close()
+    await term.close()
+    await gen.aclose()

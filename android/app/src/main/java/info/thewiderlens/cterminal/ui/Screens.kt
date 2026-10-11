@@ -24,6 +24,13 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Add
+import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.filled.Delete
+import androidx.compose.material3.SwipeToDismissBox
+import androidx.compose.material3.SwipeToDismissBoxValue
+import androidx.compose.material3.rememberSwipeToDismissBoxState
+import androidx.compose.foundation.clickable
+import androidx.compose.ui.draw.clip
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
@@ -185,8 +192,10 @@ fun HomeScreen(machines: List<Machine>, go: (Screen) -> Unit) {
                 }
             }
             if (recent.isNotEmpty()) {
-                item { Section("Recent") }
-                items(recent, key = { "r" + it.machineId + it.str("seq") + it.type }) { RecentRow(it, go) }
+                item { Section("Recent", action = "Clear all") { Inbox.clearRecent() } }
+                items(recent, key = { "r" + it.machineId + it.str("seq") + it.type }) { item ->
+                    SwipeAway(onSwiped = { Inbox.dismiss(item) }, modifier = Modifier.animateItem()) { RecentRow(item, go) }
+                }
             }
         }
     }
@@ -231,8 +240,36 @@ private fun Onboarding() {
 }
 
 @Composable
-private fun Section(text: String) =
-    Text(text.uppercase(), fontSize = 12.sp, letterSpacing = 1.5.sp, color = Mint, modifier = Modifier.padding(top = 8.dp))
+private fun Section(text: String, action: String? = null, onAction: () -> Unit = {}) {
+    Row(Modifier.fillMaxWidth().padding(top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
+        Text(text.uppercase(), fontSize = 12.sp, letterSpacing = 1.5.sp, color = Mint, modifier = Modifier.weight(1f))
+        if (action != null) Text(action, fontSize = 13.sp, color = MaterialTheme.colorScheme.onSurfaceVariant,
+            modifier = Modifier.clip(RoundedCornerShape(6.dp)).clickable(onClick = onAction).padding(horizontal = 8.dp, vertical = 4.dp))
+    }
+}
+
+/** Swipe a row sideways to remove it. A red strip with a trash can shows underneath while swiping. */
+@Composable
+fun SwipeAway(onSwiped: () -> Unit, modifier: Modifier = Modifier, confirm: Boolean = false, content: @Composable () -> Unit) {
+    val state = rememberSwipeToDismissBoxState()
+    val scope = rememberCoroutineScope()
+    SwipeToDismissBox(
+        state = state,
+        modifier = modifier,
+        backgroundContent = {
+            val toStart = state.dismissDirection == SwipeToDismissBoxValue.EndToStart
+            Box(Modifier.fillMaxSize().background(Danger.copy(alpha = 0.85f), RoundedCornerShape(12.dp)).padding(horizontal = 20.dp),
+                contentAlignment = if (toStart) Alignment.CenterEnd else Alignment.CenterStart) {
+                Icon(Icons.Default.Delete, "Remove", tint = Ink)
+            }
+        },
+        onDismiss = {
+            onSwiped()
+            if (confirm) scope.launch { state.reset() }   // the caller asks first; spring back meanwhile
+        },
+        content = { content() },
+    )
+}
 
 @Composable
 private fun Toggle(label: String, on: Boolean, set: (Boolean) -> Unit) {
@@ -287,7 +324,7 @@ private fun RecentRow(item: InboxItem, go: (Screen) -> Unit) {
         "agent_waiting" -> Triple("💬", item.str("title") ?: "Needs you", item.str("message") ?: "")
         "agent_done" -> Triple("✨", "${item.str("agent")} is done", item.str("message") ?: "")
         "approval" -> Triple("🔐", "${item.str("agent")}: ${item.str("tool")}", item.str("summary") ?: "")
-        "exited" -> Triple("⏹", "${item.str("session_name")} ended", "")
+        "exited" -> Triple("⏹", "Session ended", item.str("session_name") ?: "")
         else -> Triple("•", item.type, "")
     }
     Row(Modifier.fillMaxWidth().background(Panel, RoundedCornerShape(10.dp))
@@ -364,6 +401,7 @@ fun SessionsScreen(machine: Machine, go: (Screen) -> Unit) {
     var sessions by remember { mutableStateOf<List<SessionInfo>?>(null) }
     var error by remember { mutableStateOf<String?>(null) }
     var custom by remember { mutableStateOf(false) }
+    var ending by remember { mutableStateOf<SessionInfo?>(null) }
     BackHandler { go(Screen.Home) }
 
     LaunchedEffect(machine.id) {
@@ -400,17 +438,48 @@ fun SessionsScreen(machine: Machine, go: (Screen) -> Unit) {
                 }
             }
             error?.let { item { Text(it, color = Danger, fontSize = 14.sp) } }
-            item { Section("Running") }
             val list = sessions
+            val ended = list.orEmpty().filter { !it.alive }
+            item {
+                if (ended.isEmpty()) Section("Sessions")
+                else Section("Sessions", action = "Clear ended (${ended.size})") {
+                    scope.launch {
+                        ended.forEach { runCatching { Api.kill(machine, it.id) } }
+                        sessions = sessions?.filter { it.alive }
+                    }
+                }
+            }
             when {
                 list == null && error == null -> item { CircularProgressIndicator(color = Mint) }
                 list.isNullOrEmpty() -> item {
                     Text("Nothing running yet. Start a shell, Claude Code or Codex above: it keeps running on ${machine.name} even when you close the app.",
                         fontSize = 14.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
-                else -> items(list, key = { it.id }) { s -> SessionCard(s) { go(Screen.Terminal(machine.id, s.id, s.name)) } }
+                else -> {
+                    items(list, key = { it.id }) { s ->
+                        SwipeAway(onSwiped = { ending = s }, confirm = true, modifier = Modifier.animateItem()) {
+                            SessionCard(s, open = { go(Screen.Terminal(machine.id, s.id, s.name)) }, end = { ending = s })
+                        }
+                    }
+                }
             }
         }
+    }
+
+    ending?.let { s ->
+        fun end() {
+            ending = null
+            scope.launch {
+                runCatching { Api.kill(machine, s.id) }.onFailure { toast(context, it.message) }
+                sessions = sessions?.filterNot { it.id == s.id }
+            }
+        }
+        if (!s.alive) end() else AlertDialog(
+            onDismissRequest = { ending = null },
+            title = { Text("End “${s.name}”?") },
+            text = { Text(if (s.command != null) "“${s.command}” is still running on ${machine.name}. Ending the session stops it." else "This closes the shell on ${machine.name}. Its scrollback is gone after that.") },
+            confirmButton = { TextButton(onClick = { end() }) { Text("End session", color = Danger) } },
+            dismissButton = { TextButton(onClick = { ending = null }) { Text("Keep") } })
     }
 
     if (custom) {
@@ -423,7 +492,7 @@ fun SessionsScreen(machine: Machine, go: (Screen) -> Unit) {
 }
 
 @Composable
-private fun SessionCard(s: SessionInfo, open: () -> Unit) {
+private fun SessionCard(s: SessionInfo, open: () -> Unit, end: () -> Unit) {
     Card(colors = CardDefaults.cardColors(containerColor = Panel), modifier = Modifier.fillMaxWidth().combinedClickable(onClick = open)) {
         Column(Modifier.padding(14.dp), verticalArrangement = Arrangement.spacedBy(6.dp)) {
             Row(verticalAlignment = Alignment.CenterVertically) {
@@ -435,6 +504,9 @@ private fun SessionCard(s: SessionInfo, open: () -> Unit) {
                     s.command != null -> "running · " + Notifier.duration(s.running_for)
                     else -> "idle"
                 }, fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                IconButton(onClick = end, modifier = Modifier.size(32.dp)) {
+                    Icon(Icons.Default.Close, "End session", tint = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.size(18.dp))
+                }
             }
             s.command?.let { Text("$ $it", fontFamily = Mono, fontSize = 12.sp, color = Mint, maxLines = 1, overflow = TextOverflow.Ellipsis) }
             val preview = s.preview.trimEnd().lines().filter { it.isNotBlank() }.takeLast(4).joinToString("\n")

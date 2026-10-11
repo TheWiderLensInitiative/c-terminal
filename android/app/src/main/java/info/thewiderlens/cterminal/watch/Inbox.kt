@@ -33,6 +33,9 @@ object Inbox {
         }
     }
 
+    fun dismiss(item: InboxItem) = _recent.update { list -> list.filterNot { it === item } }
+    fun clearRecent() = _recent.update { emptyList() }
+
     fun answered(approval: String) = _pending.update { list -> list.filterNot { it.approval == approval } }
 
     fun setOnline(machineId: String, on: Boolean) {
