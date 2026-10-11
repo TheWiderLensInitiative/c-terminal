@@ -4,8 +4,16 @@
 
 [ -f ~/.bashrc ] && . ~/.bashrc
 
-# Codex keeps its conversation off the terminal's history unless it runs inline; inline, a swipe on the phone scrolls it.
-if ! alias codex >/dev/null 2>&1; then alias codex='codex --no-alt-screen'; fi
+# Codex keeps its conversation off the terminal's history unless it runs inline (--no-alt-screen); inline, a swipe on
+# the phone scrolls it. Add the flag once, only if it isn't there already (Codex refuses it twice).
+if ! alias codex >/dev/null 2>&1 && ! declare -F codex >/dev/null; then
+    codex() {
+        case " $* " in
+            *" --no-alt-screen "*) command codex "$@" ;;
+            *) command codex --no-alt-screen "$@" ;;
+        esac
+    }
+fi
 
 __ct_b64() { printf %s "$1" | base64 -w0 2>/dev/null || printf %s "$1" | base64 | tr -d '\n'; }
 __ct_at_prompt=0
