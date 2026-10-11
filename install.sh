@@ -120,17 +120,17 @@ else
     fi
 fi
 
-say "Claude Code"
-if [ -d "$HOME/.claude" ] || command -v claude >/dev/null 2>&1; then
-    if grep -q "cterm hook claude" "$HOME/.claude/settings.json" 2>/dev/null; then
+say "Claude Code and Codex"
+if [ -d "$HOME/.claude" ] || [ -d "$HOME/.codex" ] || command -v claude >/dev/null 2>&1 || command -v codex >/dev/null 2>&1; then
+    if grep -qs "cterm hook" "$HOME/.claude/settings.json" "$HOME/.codex/hooks.json"; then
         "$BIN" hooks install >/dev/null && ok "already connected (hooks refreshed)"
-    elif ask "Connect Claude Code? Its approvals (in away mode) and 'done' messages will reach your phone."; then
+    elif ask "Connect Claude Code and Codex? Their approvals (in away mode) and 'done' messages will reach your phone."; then
         "$BIN" hooks install | sed 's/^/    /'
     else
-        echo "    Skipped. Connect it later with: cterm hooks install"
+        echo "    Skipped. Connect them later with: cterm hooks install"
     fi
 else
-    echo "    Claude Code isn't installed here. If you add it later, run: cterm hooks install"
+    echo "    Neither Claude Code nor Codex is installed here. If you add one later, run: cterm hooks install"
 fi
 
 for _ in 1 2 3 4 5 6 7 8 9 10; do "$BIN" status >/dev/null 2>&1 && break; sleep 0.5; done

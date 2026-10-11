@@ -206,6 +206,7 @@ async def test_agent_done_and_codex(companion):
 
 def test_hooks_install_is_idempotent_and_removable(tmp_path, monkeypatch):
     from cterminal import __main__ as cli
+    monkeypatch.setattr(cli, "CODEX_HOOKS", str(tmp_path / "no-codex" / "hooks.json"))
     path = tmp_path / "settings.json"
     path.write_text(json.dumps({"model": "x", "hooks": {"Stop": [{"hooks": [{"type": "command", "command": "mine"}]}]}}))
     monkeypatch.setattr(cli, "CLAUDE_SETTINGS", str(path))
@@ -243,3 +244,36 @@ def test_events_after_a_restart_are_not_skipped():
     # the phone last saw seq 57 from the companion's previous run
     assert [e["type"] for e in hub.since(57)] == ["finished", "waiting"]
     assert [e["type"] for e in hub.since(1)] == ["waiting"]
+
+
+def test_codex_hooks_install_next_to_other_hooks(tmp_path, monkeypatch):
+    from cterminal import __main__ as cli
+    (tmp_path / "codex").mkdir()
+    codex = tmp_path / "codex" / "hooks.json"
+    codex.write_text(json.dumps({"hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": "mine"}]}]}}))
+    monkeypatch.setattr(cli, "CODEX_HOOKS", str(codex))
+    monkeypatch.setattr(cli, "CLAUDE_SETTINGS", str(tmp_path / "no-claude" / "settings.json"))
+    cli.hooks_install(); cli.hooks_install()
+    h = json.loads(codex.read_text())["hooks"]
+    assert len(h["PermissionRequest"]) == 1 and len(h["Stop"]) == 1 and h["PreToolUse"][0]["hooks"][0]["command"] == "mine"
+    assert "hook codex" in h["PermissionRequest"][0]["hooks"][0]["command"]
+    cli.hooks_install(remove=True)
+    assert json.loads(codex.read_text()) == {"hooks": {"PreToolUse": [{"hooks": [{"type": "command", "command": "mine"}]}]}}
+
+
+async def test_codex_permission_and_done(companion):
+    phone, local, _ = companion
+    events = await phone.ws_connect("/ws/events?approvals=1")
+    await asyncio.sleep(0.1)
+    req = {"hook_event_name": "PermissionRequest", "tool_name": "shell", "cwd": "/tmp",
+           "tool_input": {"command": ["bash", "-lc", "npm test"]}}
+    pending = asyncio.ensure_future(local.post("/hook/codex", json={"input": req}))
+    ask = await _event(events, "approval")
+    assert ask["agent"] == "Codex" and ask["summary"] == "npm test" and not ask["can_always"]
+    await phone.post(f"/api/approvals/{ask['approval']}", json={"decision": "always"})
+    d = (await (await pending).json())["hookSpecificOutput"]["decision"]
+    assert d == {"behavior": "allow"}          # Codex refuses updatedPermissions, so never send it
+    await local.post("/hook/codex", json={"input": {"hook_event_name": "Stop", "last_assistant_message": "Tests pass."}})
+    e = await _event(events, "agent_done")
+    assert e["agent"] == "Codex" and e["message"] == "Tests pass."
+    await events.close()

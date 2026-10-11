@@ -230,17 +230,34 @@ async def events_ws(request: web.Request):
 # ------------------------------------------------------------------------------------------------- hooks (local only)
 async def hook_claude(request: web.Request):
     """Called by `cterm hook claude` from Claude Code's hooks. Returns the JSON the hook should print."""
+    return await _agent_hook(request, "Claude Code")
+
+
+async def hook_codex(request: web.Request):
+    """Called by `cterm hook codex`: Codex's hooks (same shape as Claude Code's), or its older `notify` setting."""
     body = await _json(request)
+    data = body.get("input") or {}
+    if data.get("hook_event_name"):
+        return await _agent_hook(request, "Codex", body)
+    if data.get("type") == "agent-turn-complete":           # notify = [...] in ~/.codex/config.toml
+        request.app[HUB].publish({**_agent_ctx(request, "Codex", _str(body.get("session")), data.get("cwd")),
+                                  "type": "agent_done", "message": (data.get("last-assistant-message") or "")[:600]})
+    return web.json_response({})
+
+
+async def _agent_hook(request: web.Request, agent: str, body: dict | None = None):
+    body = body if body is not None else await _json(request)
     data, session = body.get("input") or {}, _str(body.get("session"))
     hub, cfg = request.app[HUB], request.app[CFG]
     event = data.get("hook_event_name")
-    ctx = _agent_ctx(request, "Claude Code", session, data.get("cwd"))
+    ctx = _agent_ctx(request, agent, session, data.get("cwd"))
 
     if event == "PermissionRequest":
         if not hub.phone_takes_approvals:
-            return web.json_response({})            # nobody's away: Claude asks in the terminal as usual
+            return web.json_response({})            # nobody's away: the agent asks in the terminal as usual
         tool, tinput = data.get("tool_name", ""), data.get("tool_input") or {}
-        suggestions = data.get("permission_suggestions") or []
+        # "Always allow" adds a permission rule. Claude Code offers rules to add; Codex hooks may not return any.
+        suggestions = (data.get("permission_suggestions") or []) if agent == "Claude Code" else []
         answer = await hub.ask({**ctx, "tool": tool, "summary": _tool_summary(tool, tinput),
                                 "detail": json.dumps(tinput, indent=1)[:2000], "can_always": bool(suggestions)},
                                cfg.approval_timeout_seconds)
@@ -258,20 +275,10 @@ async def hook_claude(request: web.Request):
         if kind == "permission_prompt" and hub.phone_takes_approvals:
             return web.json_response({})            # the PermissionRequest above already went to the phone
         if kind in ("permission_prompt", "idle_prompt", "agent_needs_input", "elicitation_dialog"):
-            hub.publish({**ctx, "type": "agent_waiting", "title": data.get("title") or "Claude Code needs you",
+            hub.publish({**ctx, "type": "agent_waiting", "title": data.get("title") or f"{agent} needs you",
                          "message": data.get("message", "")})
     elif event == "Stop" and not data.get("stop_hook_active"):
         hub.publish({**ctx, "type": "agent_done", "message": (data.get("last_assistant_message") or "")[:600]})
-    return web.json_response({})
-
-
-async def hook_codex(request: web.Request):
-    """Called by Codex's `notify` program setting (JSON payload as the argument)."""
-    body = await _json(request)
-    data, session = body.get("input") or {}, _str(body.get("session"))
-    if data.get("type") == "agent-turn-complete":
-        request.app[HUB].publish({**_agent_ctx(request, "Codex", session, data.get("cwd")), "type": "agent_done",
-                                  "message": (data.get("last-assistant-message") or "")[:600]})
     return web.json_response({})
 
 
@@ -282,9 +289,14 @@ def _agent_ctx(request, agent: str, session: str | None, cwd) -> dict:
 
 
 def _tool_summary(tool: str, tinput: dict) -> str:
-    for key in ("command", "file_path", "url", "pattern", "query", "path", "prompt"):
-        if isinstance(tinput.get(key), str):
-            return tinput[key][:300]
+    for key in ("command", "cmd", "file_path", "url", "pattern", "query", "path", "prompt", "description"):
+        value = tinput.get(key)
+        if isinstance(value, list) and value and all(isinstance(v, str) for v in value):
+            if len(value) >= 3 and value[1] in ("-c", "-lc"):     # Codex: ["bash", "-lc", "npm test"]
+                return value[2][:300]
+            return " ".join(value)[:300]
+        if isinstance(value, str) and value:
+            return value[:300]
     return tool
 
 

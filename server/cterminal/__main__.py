@@ -6,7 +6,7 @@
   cterm new [--run CMD]       start a session (and attach to it here)
   cterm attach ID             continue a session at the PC that you started on the phone (Ctrl-] to detach)
   cterm kill ID               end a session
-  cterm hooks install|remove  connect Claude Code to C Terminal (approvals + notifications on the phone)
+  cterm hooks install|remove  connect Claude Code and Codex (approvals + notifications on the phone)
   cterm hook claude|codex     (called by Claude Code / Codex; not for you)
 """
 from __future__ import annotations
@@ -54,40 +54,55 @@ def hook(kind: str) -> None:
 
 
 CLAUDE_SETTINGS = os.path.expanduser("~/.claude/settings.json")
-_MARK = "cterm hook claude"
+CODEX_HOOKS = os.path.expanduser("~/.codex/hooks.json")
 
 
-def hooks_install(remove: bool = False) -> None:
+def _cterm() -> str:
     exe = os.path.expanduser("~/.local/bin/cterm")
-    cmd = f"{exe if os.path.exists(exe) else 'cterm'} hook claude"
+    return exe if os.path.exists(exe) else "cterm"
+
+
+def _edit_hooks(path: str, kind: str, events: tuple[str, ...], remove: bool) -> None:
+    """Add (or take out) our hook in a Claude Code / Codex style hooks file, leaving everything else as it was."""
+    mark = f"cterm hook {kind}"
     settings = {}
-    if os.path.exists(CLAUDE_SETTINGS):
-        with open(CLAUDE_SETTINGS) as f:
+    if os.path.exists(path):
+        with open(path) as f:
             settings = json.load(f)
     hooks = settings.setdefault("hooks", {})
-    for event in ("PermissionRequest", "Notification", "Stop"):
-        groups = [g for g in hooks.get(event, []) if not any(_MARK in h.get("command", "") for h in g.get("hooks", []))]
+    for event in events:
+        groups = [g for g in hooks.get(event, []) if not any(mark in h.get("command", "") for h in g.get("hooks", []))]
         if not remove:
             timeout = config.Config.load().approval_timeout_seconds + 30 if event == "PermissionRequest" else 10
-            groups.append({"hooks": [{"type": "command", "command": cmd, "timeout": timeout}]})
+            groups.append({"hooks": [{"type": "command", "command": f"{_cterm()} hook {kind}", "timeout": timeout}]})
         if groups:
             hooks[event] = groups
         else:
             hooks.pop(event, None)
     if not hooks:
         settings.pop("hooks")
-    os.makedirs(os.path.dirname(CLAUDE_SETTINGS), exist_ok=True)
-    tmp = CLAUDE_SETTINGS + ".cterm-tmp"
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    tmp = path + ".cterm-tmp"
     with open(tmp, "w") as f:
         json.dump(settings, f, indent=2)
         f.write("\n")
-    os.replace(tmp, CLAUDE_SETTINGS)
-    if remove:
-        print("Removed the C Terminal hooks from Claude Code.")
-    else:
-        print(f"Claude Code now tells C Terminal when it needs you ({CLAUDE_SETTINGS}).")
-        print("For Codex, add this line to ~/.codex/config.toml:")
-        print(f'  notify = ["{exe if os.path.exists(exe) else "cterm"}", "hook", "codex"]')
+    os.replace(tmp, path)
+
+
+def hooks_install(remove: bool = False) -> None:
+    done = False
+    if remove or os.path.isdir(os.path.dirname(CLAUDE_SETTINGS)):
+        _edit_hooks(CLAUDE_SETTINGS, "claude", ("PermissionRequest", "Notification", "Stop"), remove)
+        print(("Removed the C Terminal hooks from Claude Code." if remove else
+               f"Claude Code now tells C Terminal when it needs you ({CLAUDE_SETTINGS})."))
+        done = True
+    if (remove and os.path.exists(CODEX_HOOKS)) or (not remove and os.path.isdir(os.path.dirname(CODEX_HOOKS))):
+        _edit_hooks(CODEX_HOOKS, "codex", ("PermissionRequest", "Stop"), remove)
+        print(("Removed the C Terminal hooks from Codex." if remove else
+               f"Codex now tells C Terminal when it needs you ({CODEX_HOOKS})."))
+        done = True
+    if not done:
+        print("Neither Claude Code nor Codex is set up for this user yet (no ~/.claude or ~/.codex).")
 
 
 # ------------------------------------------------------------------------------------------------- attach

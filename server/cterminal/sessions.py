@@ -254,7 +254,7 @@ def _tilde(path: str) -> str:
 
 def _is_hooked_agent(command: str) -> bool:
     first = os.path.basename(command.split()[0]) if command.split() else ""
-    return first == "claude"
+    return first in ("claude", "codex")
 
 
 def _set_size(fd: int, cols: int, rows: int) -> None:

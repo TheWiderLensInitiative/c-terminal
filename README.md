@@ -22,7 +22,7 @@ Most phone terminals make you watch the screen. **C Terminal tells you when it n
 - **✅ / ❌ Finished:** a long command is done (or failed). The notification shows the last lines of output.
 - **⌨️ Waiting for you:** a program is asking `[y/N]`, a password or "press Enter". Answer straight from the
   notification's Reply box.
-- **🔐 Claude Code approvals:** in *away mode*, Claude Code asks your phone before it runs anything. Tap **Allow**,
+- **🔐 Claude Code and Codex approvals:** in *away mode*, they ask your phone before they run anything. Tap **Allow**,
   **Deny** or **Always allow** on the lock screen (allowing needs the phone unlocked).
 - **✨ Agent done:** Claude Code or Codex finished its turn, with its last message. Reply to give it the next task.
 
@@ -59,7 +59,7 @@ Release APKs are signed with this certificate (SHA-256):
 | Start something | Open a computer → **Shell**, **Claude Code**, **Codex** or **Command…** |
 | Away mode | Switch on the home screen. While it's on, Claude Code's permission prompts go to the phone instead of the PC screen. If nobody answers within 5 minutes, Claude asks on the PC as usual |
 | At the desk | `cterm ls`, `cterm attach <id>` (Ctrl-] leaves it running), `cterm new --run claude` |
-| Codex | Add `notify = ["/home/you/.local/bin/cterm", "hook", "codex"]` to `~/.codex/config.toml` (the installer prints the exact line) |
+| Claude Code & Codex | `cterm hooks install` connects both (the installer offers it): permission prompts go to the phone in away mode, and you hear when they finish. Codex has no "Always allow" from a hook, so its approvals are Allow or Deny |
 
 Settings live in `~/.config/c-terminal/config.json`: `port` (7420), `allowed_logins` (extra Tailscale logins to let in),
 `notify_after_seconds` (10), `approval_timeout_seconds` (300), `scrollback_bytes`.
@@ -71,7 +71,7 @@ Settings live in `~/.config/c-terminal/config.json`: `port` (7420), `allowed_log
    terminal  ◀── WebSocket: bytes both ways ──▶ shell on a pseudo-terminal (bash + C Terminal integration)
    inbox     ◀── WebSocket: events ──────────── finished / waiting / approval / agent_done
                                                  ▲
-                         Claude Code hooks ──────┘ (cterm hook claude, local only)
+                Claude Code / Codex hooks ──────┘ (cterm hook claude|codex, local only)
 ```
 
 - **Server** (`server/`, Python + aiohttp): sessions on pseudo-terminals with scrollback, a bash integration that marks
