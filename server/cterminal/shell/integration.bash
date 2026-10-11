@@ -4,6 +4,9 @@
 
 [ -f ~/.bashrc ] && . ~/.bashrc
 
+# Codex keeps its conversation off the terminal's history unless it runs inline; inline, a swipe on the phone scrolls it.
+if ! alias codex >/dev/null 2>&1; then alias codex='codex --no-alt-screen'; fi
+
 __ct_b64() { printf %s "$1" | base64 -w0 2>/dev/null || printf %s "$1" | base64 | tr -d '\n'; }
 __ct_at_prompt=0
 

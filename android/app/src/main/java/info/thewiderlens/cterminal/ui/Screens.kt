@@ -390,7 +390,7 @@ private data class Launch(val label: String, val run: String?, val name: String?
 private val LAUNCHES = listOf(
     Launch("Shell", null, null),
     Launch("Claude Code", "claude", "Claude Code"),
-    Launch("Codex", "codex", "Codex"),
+    Launch("Codex", "codex --no-alt-screen", "Codex"),   // inline: its conversation stays scrollable
 )
 
 @OptIn(ExperimentalMaterial3Api::class)

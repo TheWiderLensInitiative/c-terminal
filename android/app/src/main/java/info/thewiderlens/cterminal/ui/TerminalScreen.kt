@@ -55,6 +55,7 @@ import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.draw.clipToBounds
 import androidx.compose.ui.platform.LocalContext
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.input.ImeAction
@@ -330,15 +331,13 @@ fun TerminalScreen(machine: Machine, sessionId: String, initialName: String, onB
 
 /** The terminal's text as ordinary Android text: long-press to select with handles, then Copy; or Copy all. */
 @Composable
-private fun SelectTextView(text: String, onClose: () -> Unit) {
+private fun SelectTextView(text: String, onClose: () -> Unit) = text.run {
     val context = LocalContext.current
-    val scroll = rememberScrollState()
-    LaunchedEffect(text) { scroll.scrollTo(scroll.maxValue) }
     androidx.compose.ui.window.Dialog(onDismissRequest = onClose,
         properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
         androidx.compose.material3.Surface(color = Ink, contentColor = Silver, modifier = Modifier.fillMaxSize()) {
             Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
-                Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                Row(Modifier.fillMaxWidth().background(Panel).padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
                     IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
                     Column(Modifier.weight(1f)) {
                         Text("Select text", fontWeight = FontWeight.SemiBold)
@@ -350,10 +349,30 @@ private fun SelectTextView(text: String, onClose: () -> Unit) {
                         onClose()
                     }) { Text("Copy all", color = Mint) }
                 }
-                androidx.compose.foundation.text.selection.SelectionContainer(Modifier.weight(1f).fillMaxWidth()) {
-                    Text(text.ifEmpty { "(nothing on the screen yet)" }, fontFamily = Mono, fontSize = 12.sp, lineHeight = 16.sp,
-                        modifier = Modifier.fillMaxSize().verticalScroll(scroll).horizontalScroll(rememberScrollState()).padding(10.dp))
-                }
+                // A plain Android TextView: long-press selects a word and the handles extend it. (Compose's selection
+                // and Android's "smart selection" grab whole blocks of terminal text, so both are off here.)
+                AndroidView(
+                    modifier = Modifier.weight(1f).fillMaxWidth().clipToBounds(),
+                    factory = { ctx ->
+                        val tv = android.widget.TextView(ctx).apply {
+                            textSize = 13f
+                            setTextColor(android.graphics.Color.parseColor("#D7DEE0"))
+                            setHighlightColor(android.graphics.Color.parseColor("#661ED6A6"))
+                            setPadding(28, 20, 28, 40)
+                            setTextIsSelectable(true)
+                            setTypeface(android.graphics.Typeface.create("monospace", android.graphics.Typeface.NORMAL))
+                            if (android.os.Build.VERSION.SDK_INT >= 26) setTextClassifier(android.view.textclassifier.TextClassifier.NO_OP)
+                            setText(this@run.ifEmpty { "(nothing on the screen yet)" })
+                        }
+                        android.widget.ScrollView(ctx).apply {
+                            isFillViewport = true
+                            clipToPadding = true
+                            clipChildren = true
+                            addView(tv)
+                            post { fullScroll(android.view.View.FOCUS_DOWN) }
+                        }
+                    },
+                )
             }
         }
     }
