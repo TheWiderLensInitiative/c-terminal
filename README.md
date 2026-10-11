@@ -32,8 +32,9 @@ And the terminal itself:
   there, scrollback included. Continue the same session at your desk with `cterm attach`.
 - **Your Tailscale account is the key.** The companion listens only on your Tailscale addresses and lets in only
   devices signed in to the same Tailscale account (others can be added by login). Nothing to pair, nothing to leak.
-- **Built for thumbs.** Extra-keys row (Esc, Tab, sticky Ctrl/Alt, arrows, ^C…), a line box with autocorrect and voice
-  typing for talking to agents, full-color terminal (xterm.js), adjustable font.
+- **Built for thumbs.** Swipe to scroll back (with a fling; full-screen apps get scroll-wheel input), Paste and Copy
+  keys (long-press the terminal to select text), an extra-keys row (Esc, Tab, sticky Ctrl/Alt, arrows, ^C…), a line
+  box with autocorrect and voice typing for talking to agents, full-color terminal (xterm.js), adjustable font.
 
 ## Install
 

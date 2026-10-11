@@ -29,6 +29,7 @@ log = logging.getLogger("cterminal")
 HUB = web.AppKey("hub", EventHub)
 SESSIONS = web.AppKey("sessions", SessionManager)
 SOCKETS = web.AppKey("sockets", weakref.WeakSet)
+ENTER_DELAY = 0.15   # seconds between typed text and its Enter
 IDENTITY = web.AppKey("identity", Identity)
 CFG = web.AppKey("cfg", config.Config)
 
@@ -102,7 +103,12 @@ async def session_input(request: web.Request):
     text = body.get("text")
     if not isinstance(text, str):
         raise web.HTTPBadRequest(text="text is required")
-    request.app[SESSIONS].write(s, (text + ("\r" if body.get("enter", True) else "")).encode())
+    mgr = request.app[SESSIONS]
+    mgr.write(s, text.encode())
+    if body.get("enter", True):
+        # Enter as its own keypress a moment later: in one burst, apps like Claude Code read text+Enter as a
+        # paste and insert a newline instead of submitting.
+        asyncio.get_running_loop().call_later(ENTER_DELAY, mgr.write, s, b"\r")
     return web.json_response({"ok": True})
 
 

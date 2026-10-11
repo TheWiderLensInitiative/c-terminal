@@ -45,6 +45,8 @@ import androidx.compose.material3.OutlinedTextFieldDefaults
 import androidx.compose.material3.Text
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
+import androidx.compose.runtime.LaunchedEffect
+import androidx.compose.foundation.verticalScroll
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
@@ -102,6 +104,7 @@ private class TermLink(
     private val currentFont: () -> Float,
     private val onState: (String?) -> Unit,
     private val onTitle: (String) -> Unit,
+    private val onLongPress: () -> Unit,
 ) {
     private val main = Handler(Looper.getMainLooper())
     private val pending = ByteArrayOutputStream()
@@ -118,9 +121,18 @@ private class TermLink(
     @JavascriptInterface fun resize(c: Int, r: Int) { cols = c; rows = r; ws?.send("""{"type":"resize","cols":$c,"rows":$r}""") }
     @JavascriptInterface fun title(t: String) { main.post { onTitle(t) } }
     @JavascriptInterface fun fontSize(): String = currentFont().toString()
+    @JavascriptInterface fun longPress() { main.post { onLongPress() } }
 
     fun send(text: String) { ws?.send(text.toByteArray().toByteString()) }
     fun redraw() { ws?.send("""{"type":"redraw"}""") }
+
+    /** Type a line, then press Enter as a separate keypress. Sent in one burst, apps like Claude Code take
+     *  text+Enter for a paste and add a new line instead of submitting. */
+    fun sendLine(text: String) {
+        if (text.isEmpty()) { send("\r"); return }
+        send(text)
+        main.postDelayed({ send("\r") }, 150)
+    }
 
     private fun js(code: String) = web.evaluateJavascript(code, null)
 
@@ -171,7 +183,7 @@ private class TermLink(
 }
 
 private val KEYS = listOf(
-    "Esc" to "\u001b", "Tab" to "\t", "Ctrl" to "", "Alt" to "", "←" to "\u001b[D", "↑" to "\u001b[A",
+    "Esc" to "\u001b", "Tab" to "\t", "Ctrl" to "", "Alt" to "", "Paste" to "", "Copy" to "", "←" to "\u001b[D", "↑" to "\u001b[A",
     "↓" to "\u001b[B", "→" to "\u001b[C", "^C" to "\u0003", "|" to "|", "~" to "~", "/" to "/", "-" to "-",
     "Home" to "\u001b[H", "End" to "\u001b[F", "PgUp" to "\u001b[5~", "PgDn" to "\u001b[6~", "^D" to "\u0004",
 )
@@ -190,6 +202,18 @@ fun TerminalScreen(machine: Machine, sessionId: String, initialName: String, onB
     var menu by remember { mutableStateOf(false) }
     var link by remember { mutableStateOf<TermLink?>(null) }
     var web by remember { mutableStateOf<WebView?>(null) }
+    var selectText by remember { mutableStateOf<String?>(null) }
+
+    fun paste() {
+        val clip = context.getSystemService(ClipboardManager::class.java).primaryClip?.getItemAt(0)?.coerceToText(context)?.toString()
+        if (clip.isNullOrEmpty()) toast(context, "The clipboard is empty")
+        else web?.evaluateJavascript("ct.paste(${org.json.JSONObject.quote(clip)})", null)
+    }
+    fun openSelect() {
+        web?.evaluateJavascript("ct.text(3000)") { raw ->
+            selectText = runCatching { org.json.JSONArray("[$raw]").getString(0) }.getOrDefault("")
+        }
+    }
 
     BackHandler(onBack = onBack)
     DisposableEffect(Unit) { onDispose { link?.close(); web?.destroy() } }
@@ -207,21 +231,8 @@ fun TerminalScreen(machine: Machine, sessionId: String, initialName: String, onB
             Box {
                 IconButton(onClick = { menu = true }) { Icon(Icons.Default.MoreVert, "More") }
                 DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
-                    DropdownMenuItem(text = { Text("Paste") }, onClick = {
-                        menu = false
-                        val clip = context.getSystemService(ClipboardManager::class.java).primaryClip?.getItemAt(0)?.coerceToText(context)?.toString()
-                        if (!clip.isNullOrEmpty()) web?.evaluateJavascript("ct.paste(${org.json.JSONObject.quote(clip)})", null)
-                    })
-                    DropdownMenuItem(text = { Text("Copy selection") }, onClick = {
-                        menu = false
-                        web?.evaluateJavascript("ct.selection()") { raw ->
-                            val text = runCatching { org.json.JSONArray("[$raw]").getString(0) }.getOrDefault("")
-                            if (text.isNotEmpty()) {
-                                context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("terminal", text))
-                                Toast.makeText(context, "Copied", Toast.LENGTH_SHORT).show()
-                            } else Toast.makeText(context, "Long-press the terminal to select text first", Toast.LENGTH_SHORT).show()
-                        }
-                    })
+                    DropdownMenuItem(text = { Text("Paste") }, onClick = { menu = false; paste() })
+                    DropdownMenuItem(text = { Text("Select & copy text") }, onClick = { menu = false; openSelect() })
                     DropdownMenuItem(text = { Text("Redraw") }, onClick = { menu = false; link?.redraw() })
                     DropdownMenuItem(text = { Text("End session", color = Danger) }, onClick = { menu = false; onKill() })
                 }
@@ -234,6 +245,8 @@ fun TerminalScreen(machine: Machine, sessionId: String, initialName: String, onB
                 WebView(ctx).apply {
                     layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
                     setBackgroundColor(android.graphics.Color.parseColor("#05080a"))
+                    // The terminal's hidden input box isn't a form: no "Autofill" bubbles over it.
+                    importantForAutofill = android.view.View.IMPORTANT_FOR_AUTOFILL_NO_EXCLUDE_DESCENDANTS
                     settings.javaScriptEnabled = true
                     settings.domStorageEnabled = false
                     settings.allowContentAccess = false
@@ -243,7 +256,7 @@ fun TerminalScreen(machine: Machine, sessionId: String, initialName: String, onB
                         override fun shouldOverrideUrlLoading(view: WebView, request: android.webkit.WebResourceRequest) = true
                     }
                     font = kotlinx.coroutines.runBlocking { store.settingsNow().fontSize }
-                    val l = TermLink(machine, sessionId, this, mods, { font }, { state = it }, { if (it.isNotBlank()) title = it })
+                    val l = TermLink(machine, sessionId, this, mods, { font }, { state = it }, { if (it.isNotBlank()) title = it }, { openSelect() })
                     addJavascriptInterface(l, "Android")
                     link = l
                     web = this
@@ -260,6 +273,8 @@ fun TerminalScreen(machine: Machine, sessionId: String, initialName: String, onB
                     when (label) {
                         "Ctrl" -> mods.ctrl = !mods.ctrl
                         "Alt" -> mods.alt = !mods.alt
+                        "Paste" -> paste()
+                        "Copy" -> openSelect()
                         else -> link?.send(mods.apply(seq))
                     }
                 }
@@ -273,15 +288,48 @@ fun TerminalScreen(machine: Machine, sessionId: String, initialName: String, onB
                 textStyle = MaterialTheme.typography.bodyMedium.copy(fontFamily = Mono),
                 singleLine = true,
                 keyboardOptions = KeyboardOptions(imeAction = ImeAction.Send),
-                keyboardActions = KeyboardActions(onSend = { link?.send(mods.apply(line) + "\r"); line = "" }),
+                keyboardActions = KeyboardActions(onSend = { link?.sendLine(mods.apply(line)); line = "" }),
                 colors = OutlinedTextFieldDefaults.colors(focusedBorderColor = Mint, unfocusedBorderColor = MaterialTheme.colorScheme.outline),
                 shape = RoundedCornerShape(12.dp),
             )
-            IconButton(onClick = { link?.send(if (line.isEmpty()) "\r" else line + "\r"); line = "" }) {
+            IconButton(onClick = { link?.sendLine(mods.apply(line)); line = "" }) {
                 Icon(Icons.AutoMirrored.Filled.Send, "Send", tint = Mint)
             }
         }
     }
+    }
+
+    selectText?.let { text -> SelectTextView(text, onClose = { selectText = null }) }
+}
+
+/** The terminal's text as ordinary Android text: long-press to select with handles, then Copy; or Copy all. */
+@Composable
+private fun SelectTextView(text: String, onClose: () -> Unit) {
+    val context = LocalContext.current
+    val scroll = rememberScrollState()
+    LaunchedEffect(text) { scroll.scrollTo(scroll.maxValue) }
+    androidx.compose.ui.window.Dialog(onDismissRequest = onClose,
+        properties = androidx.compose.ui.window.DialogProperties(usePlatformDefaultWidth = false)) {
+        androidx.compose.material3.Surface(color = Ink, contentColor = Silver, modifier = Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxSize().statusBarsPadding().navigationBarsPadding()) {
+                Row(Modifier.fillMaxWidth().padding(horizontal = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+                    IconButton(onClick = onClose) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Back") }
+                    Column(Modifier.weight(1f)) {
+                        Text("Select text", fontWeight = FontWeight.SemiBold)
+                        Text("Long-press to select, then Copy", fontSize = 12.sp, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    }
+                    androidx.compose.material3.TextButton(onClick = {
+                        context.getSystemService(ClipboardManager::class.java).setPrimaryClip(ClipData.newPlainText("terminal", text))
+                        Toast.makeText(context, "Copied everything", Toast.LENGTH_SHORT).show()
+                        onClose()
+                    }) { Text("Copy all", color = Mint) }
+                }
+                androidx.compose.foundation.text.selection.SelectionContainer(Modifier.weight(1f).fillMaxWidth()) {
+                    Text(text.ifEmpty { "(nothing on the screen yet)" }, fontFamily = Mono, fontSize = 12.sp, lineHeight = 16.sp,
+                        modifier = Modifier.fillMaxSize().verticalScroll(scroll).horizontalScroll(rememberScrollState()).padding(10.dp))
+                }
+            }
+        }
     }
 }
 

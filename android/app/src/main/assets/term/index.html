@@ -6,12 +6,16 @@
 <link rel="stylesheet" href="xterm.css">
 <style>
   html, body { margin: 0; height: 100%; background: #05080a; overflow: hidden; }
-  #term { position: absolute; inset: 4px 2px 0 6px; }
+  #term { position: absolute; inset: 4px 2px 0 6px; touch-action: none; }
+  #bottom { position: absolute; right: 14px; bottom: 14px; width: 44px; height: 44px; border-radius: 22px;
+            border: 1px solid #5cfded; background: rgba(5,8,10,.85); color: #5cfded; font: 22px sans-serif;
+            display: none; align-items: center; justify-content: center; z-index: 10; }
   .xterm .xterm-viewport { background: #05080a !important; }
 </style>
 </head>
 <body>
 <div id="term"></div>
+<button id="bottom" aria-label="Jump to the bottom">↓</button>
 <script src="xterm.js"></script>
 <script src="addon-fit.js"></script>
 <script>
@@ -37,7 +41,7 @@
   term.open(document.getElementById("term"));
 
   const ta = document.querySelector(".xterm-helper-textarea");
-  if (ta) { ta.setAttribute("autocapitalize", "off"); ta.setAttribute("autocorrect", "off"); ta.setAttribute("spellcheck", "false"); }
+  if (ta) { ta.setAttribute("autocapitalize", "off"); ta.setAttribute("autocorrect", "off"); ta.setAttribute("spellcheck", "false"); ta.setAttribute("autocomplete", "off"); }
 
   term.onData(d => Android.input(d));
   term.onBinary(d => Android.input(d));
@@ -63,7 +67,92 @@
     paste: text => term.paste(text),
     selection: () => term.getSelection(),
     scrollToBottom: () => term.scrollToBottom(),
+    // The last `max` lines (scrollback + screen) as plain text, for the select-and-copy view.
+    text: max => {
+      const buf = term.buffer.active, out = [];
+      for (let i = Math.max(0, buf.length - max); i < buf.length; i++) {
+        const line = buf.getLine(i);
+        const t = line ? line.translateToString(true) : "";
+        if (line && line.isWrapped && out.length) out[out.length - 1] += t; else out.push(t);
+      }
+      while (out.length && !out[out.length - 1].trim()) out.pop();
+      return out.join("\n");
+    },
   };
+
+  // ---- touch scrolling -------------------------------------------------------------------------------------------
+  // A swipe scrolls the history (with a fling). Full-screen apps (vim, htop, less) get mouse-wheel events if they asked
+  // for the mouse, or arrow keys otherwise, like a desktop terminal's scroll wheel. A tap still opens the keyboard.
+  const host = document.getElementById("term");
+  const bottomBtn = document.getElementById("bottom");
+  let startY = 0, lastY = 0, lastT = 0, acc = 0, velocity = 0, dragging = false, fling = 0;
+
+  function lineHeight() {
+    const screen = host.querySelector(".xterm-screen");
+    return screen && term.rows ? screen.clientHeight / term.rows : 17;
+  }
+  function scrollBy(lines) {          // lines < 0: towards older output
+    if (!lines) return;
+    const buf = term.buffer.active;
+    if (buf.type === "alternate") {
+      const up = lines < 0, n = Math.min(Math.abs(lines), 10);
+      let seq;
+      if (term.modes.mouseTrackingMode !== "none") {
+        const col = Math.floor(term.cols / 2), row = Math.floor(term.rows / 2);
+        seq = `\x1b[<${up ? 64 : 65};${col};${row}M`;
+      } else {
+        seq = term.modes.applicationCursorKeysMode ? (up ? "\x1bOA" : "\x1bOB") : (up ? "\x1b[A" : "\x1b[B");
+      }
+      Android.input(seq.repeat(n));
+    } else {
+      term.scrollLines(lines);
+    }
+  }
+  function updateBottom() {
+    const buf = term.buffer.active;
+    bottomBtn.style.display = buf.type === "normal" && buf.viewportY < buf.baseY ? "flex" : "none";
+  }
+  let pressTimer = 0;                 // long-press opens the select-and-copy view
+  host.addEventListener("touchstart", e => {
+    if (e.touches.length !== 1) return;
+    cancelAnimationFrame(fling);
+    clearTimeout(pressTimer);
+    pressTimer = setTimeout(() => { if (!dragging) Android.longPress(); }, 550);
+    startY = lastY = e.touches[0].clientY; lastT = performance.now(); acc = 0; velocity = 0; dragging = false;
+  }, { passive: true, capture: true });
+  host.addEventListener("touchmove", e => {
+    if (e.touches.length !== 1) return;
+    const y = e.touches[0].clientY, now = performance.now();
+    if (!dragging && Math.abs(y - startY) < 8) return;
+    dragging = true;
+    clearTimeout(pressTimer);
+    e.preventDefault(); e.stopPropagation();
+    const dy = lastY - y;                 // finger up = positive = newer output
+    velocity = dy / Math.max(1, now - lastT);
+    lastY = y; lastT = now;
+    acc += dy;
+    const h = lineHeight(), lines = Math.trunc(acc / h);
+    if (lines) { acc -= lines * h; scrollBy(lines); }
+  }, { passive: false, capture: true });
+  host.addEventListener("touchend", e => {
+    clearTimeout(pressTimer);
+    if (!dragging) return;              // a tap: let xterm focus and open the keyboard
+    e.preventDefault(); e.stopPropagation();
+    dragging = false;
+    let v = velocity * 16;              // px per frame
+    const step = () => {
+      if (Math.abs(v) < 0.6) return;
+      acc += v; v *= 0.94;
+      const h = lineHeight(), lines = Math.trunc(acc / h);
+      if (lines) { acc -= lines * h; scrollBy(lines); }
+      fling = requestAnimationFrame(step);
+    };
+    if (term.buffer.active.type === "normal") fling = requestAnimationFrame(step);
+  }, { passive: false, capture: true });
+  host.addEventListener("touchcancel", () => clearTimeout(pressTimer), { capture: true });
+  term.onScroll(updateBottom);
+  term.onWriteParsed(updateBottom);
+  bottomBtn.addEventListener("click", () => { term.scrollToBottom(); updateBottom(); });
 
   refit();
   Android.ready(term.cols, term.rows);
