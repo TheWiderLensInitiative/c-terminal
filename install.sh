@@ -28,7 +28,8 @@ ask()  {   # ask "Question?" -> 0 for yes. Reads the terminal even when piped fr
 [ "$(uname -s)" = Linux ] || die "The companion runs on Linux for now (macOS is planned)."
 
 # --- where the code lives: this repo, or a fresh clone in ~/c-terminal ---------------------------------------------
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]:-$0}")" 2>/dev/null && pwd || true)"
+HERE=""   # piped from curl there is no script file: always use ~/c-terminal then
+if [ -n "${BASH_SOURCE[0]:-}" ] && [ -f "${BASH_SOURCE[0]}" ]; then HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"; fi
 if [ -n "$HERE" ] && [ -f "$HERE/server/cterminal/server.py" ]; then
     ROOT="$HERE"
 else
