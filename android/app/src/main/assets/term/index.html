@@ -11,6 +11,10 @@
             border: 1px solid #5cfded; background: rgba(5,8,10,.85); color: #5cfded; font: 22px sans-serif;
             display: none; align-items: center; justify-content: center; z-index: 10; }
   .xterm .xterm-viewport { background: #05080a !important; }
+  /* Double-tap: a see-through copy of the screen's text on top, so Android can select it (handles + Copy bubble). */
+  #sel { position: absolute; z-index: 20; margin: 0; padding: 0; white-space: pre; overflow: hidden; color: transparent;
+         -webkit-user-select: text; user-select: text; font-kerning: none; }
+  #sel::selection { background: rgba(92,253,237,.35); color: transparent; }
 </style>
 </head>
 <body>
@@ -147,6 +151,46 @@
 
   // What is selected right now: the terminal's own selection, or text selected by Android's press-and-hold.
   window.ct.selected = () => term.getSelection() || String(window.getSelection() || "");
+
+  // ---- double-tap to select ------------------------------------------------------------------------------------------
+  let lastTap = 0, lastTapX = 0, lastTapY = 0, sel = null, hadSelection = false;
+  function closeSel() { if (sel) { sel.remove(); sel = null; hadSelection = false; } }
+  function openSel(x, y) {
+    closeSel();
+    const screen = host.querySelector(".xterm-screen");
+    if (!screen) return;
+    const r = screen.getBoundingClientRect(), buf = term.buffer.active, lines = [];
+    for (let i = 0; i < term.rows; i++) {
+      const line = buf.getLine(buf.viewportY + i);
+      lines.push(line ? line.translateToString(true) : "");
+    }
+    sel = document.createElement("pre");
+    sel.id = "sel";
+    sel.textContent = lines.join("\n");
+    const cellW = r.width / term.cols, cellH = r.height / term.rows;
+    Object.assign(sel.style, { left: r.left + "px", top: r.top + "px", width: r.width + "px", height: r.height + "px",
+      fontFamily: term.options.fontFamily, fontSize: term.options.fontSize + "px", lineHeight: cellH + "px" });
+    document.body.appendChild(sel);
+    // line the copy's letters up with the terminal's cells
+    const probe = document.createElement("span"); probe.textContent = "M".repeat(50);
+    sel.appendChild(probe); const w = probe.getBoundingClientRect().width / 50; probe.remove();
+    sel.style.letterSpacing = (cellW - w) + "px";
+    Android.selectAt(x, y);            // a real long-press at the spot: Android selects the word with handles
+  }
+  document.addEventListener("selectionchange", () => {
+    if (!sel) return;
+    const has = String(window.getSelection() || "").length > 0;
+    if (has) hadSelection = true;
+    else if (hadSelection) closeSel();   // tapped away or copied: back to the terminal
+  });
+  host.addEventListener("touchend", e => {
+    if (swiping || e.changedTouches.length !== 1) return;
+    const t = e.changedTouches[0], now = performance.now();
+    if (now - lastTap < 350 && Math.abs(t.clientX - lastTapX) < 40 && Math.abs(t.clientY - lastTapY) < 40) {
+      lastTap = 0; e.preventDefault(); openSel(t.clientX, t.clientY);
+    } else { lastTap = now; lastTapX = t.clientX; lastTapY = t.clientY; }
+  }, { capture: true });
+  term.onScroll(closeSel);
 
   refit();
   Android.ready(term.cols, term.rows);

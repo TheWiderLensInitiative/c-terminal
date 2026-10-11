@@ -138,6 +138,20 @@ private class TermLink(
     @JavascriptInterface fun title(t: String) { main.post { onTitle(t) } }
     @JavascriptInterface fun fontSize(): String = currentFont().toString()
 
+    /** Press and hold at a point of the page (CSS pixels), as a finger would: Android selects the word there. */
+    @JavascriptInterface fun selectAt(x: Float, y: Float) {
+        main.post {
+            val d = web.resources.displayMetrics.density
+            val px = x * d; val py = y * d
+            val t = android.os.SystemClock.uptimeMillis()
+            web.dispatchTouchEvent(android.view.MotionEvent.obtain(t, t, android.view.MotionEvent.ACTION_DOWN, px, py, 0))
+            main.postDelayed({
+                val u = android.os.SystemClock.uptimeMillis()
+                web.dispatchTouchEvent(android.view.MotionEvent.obtain(t, u, android.view.MotionEvent.ACTION_UP, px, py, 0))
+            }, android.view.ViewConfiguration.getLongPressTimeout() + 250L)
+        }
+    }
+
     fun send(text: String) { ws?.send(text.toByteArray().toByteString()) }
     fun redraw() { ws?.send("""{"type":"redraw"}""") }
 
