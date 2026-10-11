@@ -38,6 +38,8 @@ class EventHub:
         return event
 
     def since(self, seq: int) -> list[dict]:
+        if seq > self.seq:   # the phone remembers numbers from before this companion restarted: send everything
+            seq = 0
         return [e for e in self.events if e["seq"] > seq]
 
     @property

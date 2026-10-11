@@ -53,7 +53,7 @@ class Session:
 
     def summary(self) -> dict:
         return {
-            "id": self.id, "name": self.name, "created": self.created, "cwd": self.cwd,
+            "id": self.id, "name": self.name, "created": self.created, "cwd": _tilde(self.cwd),
             "command": self.command, "running_for": time.time() - self.command_started if self.command else 0,
             "last_output": self.last_output, "alive": self.exit_code is None, "exit_code": self.exit_code,
             "attached": len(self.clients), "cols": self.cols, "rows": self.rows,
@@ -242,6 +242,14 @@ class SessionManager:
         r = self.emit(event)
         if asyncio.iscoroutine(r):
             asyncio.ensure_future(r)
+
+
+def _tilde(path: str) -> str:
+    """~/projects/app instead of /home/you/projects/app: shorter on a phone screen."""
+    home = os.path.expanduser("~")
+    if path == home:
+        return "~"
+    return "~" + path[len(home):] if path.startswith(home + os.sep) else path
 
 
 def _is_hooked_agent(command: str) -> bool:

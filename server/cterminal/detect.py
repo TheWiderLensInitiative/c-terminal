@@ -56,7 +56,8 @@ class MarkerParser:
         return bytes(out), events
 
 
-_ANSI = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b[@-Z\\-_]")
+# CSI, OSC, then any other escape (ESC, optional intermediates, final byte: covers ESC(B, ESC>, ESC=, ESC7…)
+_ANSI = re.compile(rb"\x1b\[[0-?]*[ -/]*[@-~]|\x1b\][^\x07\x1b]*(\x07|\x1b\\)|\x1b[ -/]*[0-~]")
 
 # A line ending like one of these, with no output after it for a moment, is a program waiting for its person.
 _WAITING = [

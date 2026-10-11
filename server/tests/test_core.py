@@ -38,6 +38,11 @@ def test_waiting_prompts(line):
     assert detect.waiting_prompt(b"some output\r\n\x1b[1m" + line.encode() + b"\x1b[0m")
 
 
+def test_previews_drop_all_escape_codes():
+    raw = b"\x1b[?1h\x1b=\x1b(Bhello \x1b[1;32mworld\x1b[0m\x1b>\x1b7\r\n\x1b]0;title\x07done"
+    assert detect.plain_tail(raw) == "hello world\ndone"
+
+
 @pytest.mark.parametrize("line", ["$ ", "Compiling foo v1.0", "Downloaded 3 files", "what is this?"])
 def test_not_waiting(line):
     assert detect.waiting_prompt(line.encode()) is None
@@ -135,6 +140,7 @@ async def test_session_runs_reattaches_and_reports_finished_commands(companion):
     await ws2.close()
     sessions = await (await phone.get("/api/sessions")).json()
     assert sessions[0]["id"] == s["id"] and sessions[0]["alive"]
+    assert sessions[0]["cwd"] == "~"   # started in the home folder, shown short
     assert (await phone.delete(f"/api/sessions/{s['id']}")).status == 200
     await events.close()
 
@@ -227,3 +233,13 @@ async def test_stops_promptly_with_phones_connected(tmp_path, monkeypatch):
     await events.close()
     await term.close()
     await gen.aclose()
+
+
+def test_events_after_a_restart_are_not_skipped():
+    from cterminal.events import EventHub
+    hub = EventHub()
+    hub.publish({"type": "finished"})
+    hub.publish({"type": "waiting"})
+    # the phone last saw seq 57 from the companion's previous run
+    assert [e["type"] for e in hub.since(57)] == ["finished", "waiting"]
+    assert [e["type"] for e in hub.since(1)] == ["waiting"]
