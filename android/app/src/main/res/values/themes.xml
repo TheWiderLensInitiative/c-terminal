@@ -1,0 +1,9 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <string name="app_name">C Terminal</string>
+    <style name="Theme.CTerminal" parent="android:Theme.Material.NoActionBar">
+        <item name="android:windowBackground">@color/launcher_bg</item>
+        <item name="android:statusBarColor">@android:color/transparent</item>
+        <item name="android:navigationBarColor">@android:color/transparent</item>
+    </style>
+</resources>

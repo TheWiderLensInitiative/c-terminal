@@ -1,0 +1,15 @@
+C Terminal
+Copyright 2026 The Wider Lens Initiative Project
+
+Licensed under the Apache License, Version 2.0 (see LICENSE).
+
+C Terminal uses these projects:
+
+- xterm.js and @xterm/addon-fit (The xterm.js authors) — MIT — bundled in the Android app
+  (android/app/src/main/assets/term/XTERM-LICENSE.txt)
+- OkHttp (Square) — Apache-2.0; Jetpack Compose and AndroidX — Apache-2.0; kotlinx — Apache-2.0
+- aiohttp — Apache-2.0
+- Tailscale (used, not bundled) — https://tailscale.com
+
+Claude Code is a product of Anthropic and Codex a product of OpenAI. C Terminal works with them through their public
+hook and notify settings; it is not affiliated with or endorsed by either company, or by Tailscale.

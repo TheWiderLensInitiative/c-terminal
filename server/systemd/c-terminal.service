@@ -1,0 +1,15 @@
+# systemd user service: the installer copies this to ~/.config/systemd/user/ and enables it.
+[Unit]
+Description=C Terminal companion (your terminal on your phone, over Tailscale)
+After=network-online.target tailscaled.service
+
+[Service]
+WorkingDirectory=%h/c-terminal/server
+ExecStart=%h/c-terminal/server/.venv/bin/python -m cterminal serve
+Restart=on-failure
+RestartSec=5
+# Sessions are this service's children: stopping the service ends them, so don't kill them on reload.
+KillMode=mixed
+
+[Install]
+WantedBy=default.target

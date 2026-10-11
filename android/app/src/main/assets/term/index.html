@@ -1,0 +1,72 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, maximum-scale=1, user-scalable=no">
+<link rel="stylesheet" href="xterm.css">
+<style>
+  html, body { margin: 0; height: 100%; background: #05080a; overflow: hidden; }
+  #term { position: absolute; inset: 4px 2px 0 6px; }
+  .xterm .xterm-viewport { background: #05080a !important; }
+</style>
+</head>
+<body>
+<div id="term"></div>
+<script src="xterm.js"></script>
+<script src="addon-fit.js"></script>
+<script>
+  // The page only draws. Kotlin owns the connection: Android.* sends, window.ct.* receives.
+  const term = new Terminal({
+    fontFamily: "'DejaVu Sans Mono', 'Droid Sans Mono', monospace",
+    fontSize: Number(Android.fontSize()) || 13,
+    scrollback: 20000,
+    cursorBlink: true,
+    allowProposedApi: true,
+    macOptionIsMeta: true,
+    theme: {
+      background: "#05080a", foreground: "#e6f1f0", cursor: "#5cfded", cursorAccent: "#05080a",
+      selectionBackground: "#1f6f68",
+      black: "#0b1012", red: "#ff5f6d", green: "#3ef2a5", yellow: "#ffd166", blue: "#5ab0ff",
+      magenta: "#d38cff", cyan: "#5cfded", white: "#d7e3e2",
+      brightBlack: "#5a6b6e", brightRed: "#ff8a94", brightGreen: "#7dffc4", brightYellow: "#ffe29a",
+      brightBlue: "#8cc8ff", brightMagenta: "#e3b2ff", brightCyan: "#9ffff5", brightWhite: "#ffffff",
+    },
+  });
+  const fit = new FitAddon.FitAddon();
+  term.loadAddon(fit);
+  term.open(document.getElementById("term"));
+
+  const ta = document.querySelector(".xterm-helper-textarea");
+  if (ta) { ta.setAttribute("autocapitalize", "off"); ta.setAttribute("autocorrect", "off"); ta.setAttribute("spellcheck", "false"); }
+
+  term.onData(d => Android.input(d));
+  term.onBinary(d => Android.input(d));
+  term.onResize(({cols, rows}) => Android.resize(cols, rows));
+  term.onTitleChange(t => Android.title(t));
+
+  function refit() { try { fit.fit(); } catch (e) {} }
+  new ResizeObserver(refit).observe(document.getElementById("term"));
+
+  function b64bytes(b64) {
+    const s = atob(b64), out = new Uint8Array(s.length);
+    for (let i = 0; i < s.length; i++) out[i] = s.charCodeAt(i);
+    return out;
+  }
+
+  window.ct = {
+    write: b64 => term.write(b64bytes(b64)),
+    reset: () => term.reset(),
+    note: text => term.write("\r\n\x1b[38;2;92;253;237m" + text + "\x1b[0m\r\n"),
+    font: size => { term.options.fontSize = size; refit(); },
+    focus: () => term.focus(),
+    blur: () => term.blur(),
+    paste: text => term.paste(text),
+    selection: () => term.getSelection(),
+    scrollToBottom: () => term.scrollToBottom(),
+  };
+
+  refit();
+  Android.ready(term.cols, term.rows);
+</script>
+</body>
+</html>
