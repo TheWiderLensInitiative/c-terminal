@@ -9,6 +9,10 @@
   <img src="https://img.shields.io/badge/network-Tailscale-5cfded" alt="Tailscale">
 </p>
 
+<p align="center"><a href="https://cterminal.thewiderlens.info">cterminal.thewiderlens.info</a> ·
+<a href="https://github.com/TheWiderLensInitiative/c-terminal/releases/latest">Download</a> ·
+<a href="docs/PRIVACY.md">Privacy</a> · <a href="SECURITY.md">Security</a></p>
+
 C Terminal is a free, open-source Android app plus a small companion for your PC. Run any command or program on your
 computer from your phone (a shell, `htop`, **Claude Code**, **Codex**) over your own private Tailscale network. No
 cloud relay, no accounts, no SSH keys.
@@ -44,6 +48,8 @@ It installs the companion (no sudo), starts it at login, and offers to connect C
 
 **2. On the phone:** install the APK from [Releases](https://github.com/TheWiderLensInitiative/c-terminal/releases/latest),
 make sure Tailscale is on (same account), tap **Add computer** and type the name the installer printed (like `clara-pc`).
+Release APKs are signed with this certificate (SHA-256):
+`D0:97:5D:08:D8:26:0A:86:C8:8F:E2:68:0B:A5:CA:53:D8:15:00:AA:AA:EE:8C:34:B9:CB:57:7F:81:98:2D:8B`
 
 ## Using it
 
@@ -89,4 +95,4 @@ send files and clipboard both ways.
 
 ---
 
-Created by DevIgnite × The Wider Lens Initiative Project · Apache-2.0
+Questions: cterminal@thewiderlens.info · Created by DevIgnite × The Wider Lens Initiative Project · Apache-2.0
